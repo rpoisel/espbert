@@ -46,37 +46,18 @@
   -CPU Frequency: 160Hz
 */
 
+#include "components.h"
+#include "globals.h"
+
 #include <FreeRTOS.h>
 #include <VS1053.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
 
-#include <utility>
-
-struct StreamFrame
-{
-  uint8_t buf[64];
-  size_t numBytes;
-};
-
-uint8_t const VS1053_CS = 32;
-uint8_t const VS1053_DCS = 33;
-uint8_t const VS1053_DREQ = 34;
-uint8_t const VOLUME = 100;
-
-//  http://stream-uk1.radioparadise.com:80/mp3-128
-char const* host = "stream-uk1.radioparadise.com";
-char const* path = "/mp3-128";
-int const httpPort = 80;
-
-std::pair<char const*, char const*> const wifiCredentials[] = {
-    // {"SSID", "PASSWORD"},
-};
-
 VS1053 player(VS1053_CS, VS1053_DCS, VS1053_DREQ);
 WiFiClient wifiClient;
 WiFiMulti wifiMulti;
-auto queue = xQueueCreate(8, sizeof(StreamFrame));
+auto queue = xQueueCreate(QUEUE_LENGTH, sizeof(StreamFrame));
 
 static void setupWIFI(void);
 static void TaskHttpReader(void* param);
@@ -101,6 +82,10 @@ void setup()
 
   xTaskCreate(TaskHttpReader, "HttpReader", 4096 /* Stack size */, nullptr, 2 /* priority */,
               nullptr);
+  while (uxQueueMessagesWaiting(queue) < ((3 * QUEUE_LENGTH) / 4))
+  {
+    delay(100);
+  }
 }
 
 void loop()
@@ -112,40 +97,33 @@ void loop()
 
 static void TaskHttpReader(void* param)
 {
-  Serial.print("Connecting ");
-
-  while (wifiMulti.run() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-
   Serial.print("connecting to ");
-  Serial.println(host);
+  Serial.println(HOST);
 
-  if (!wifiClient.connect(host, httpPort))
+  bool connected;
+  do
   {
     Serial.println("Connection failed");
-    return;
-  }
+    connected = wifiClient.connect(HOST, HTTP_PORT);
+    if (!connected)
+    {
+      delay(1000);
+    }
+  } while (!connected);
 
   Serial.print("Requesting stream: ");
-  Serial.println(path);
+  Serial.println(PATH);
 
-  wifiClient.print(String("GET ") + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\n" +
+  wifiClient.print(String("GET ") + PATH + " HTTP/1.1\r\n" + "Host: " + HOST + "\r\n" +
                    "Connection: close\r\n\r\n");
   for (;;)
   {
     if (!wifiClient.connected())
     {
       Serial.println("Reconnecting...");
-      if (wifiClient.connect(host, httpPort))
+      if (wifiClient.connect(HOST, HTTP_PORT))
       {
-        wifiClient.print(String("GET ") + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\n" +
+        wifiClient.print(String("GET ") + PATH + " HTTP/1.1\r\n" + "Host: " + HOST + "\r\n" +
                          "Connection: close\r\n\r\n");
       }
     }
@@ -164,4 +142,16 @@ static void setupWIFI(void)
   {
     wifiMulti.addAP(credentialPair.first, credentialPair.second);
   }
+
+  Serial.print("Connecting ");
+
+  while (wifiMulti.run() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
 }
